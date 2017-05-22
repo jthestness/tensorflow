@@ -32,13 +32,13 @@ template<> void CopyTensorData<CPUDevice>(void* dst, void* src, size_t size) {
 // Accumulate values on a CPU.
 template<> void AccumulateTensorData<CPUDevice, float>(
         float* dst, float* src, size_t size) {
-    for(unsigned int i = 0; i < size; i++) {
+    for (unsigned int i = 0; i < size; i++) {
         dst[i] += src[i];
     }
 };
 template<> void AccumulateTensorData<CPUDevice, int>(
         int* dst, int* src, size_t size) {
-    for(unsigned int i = 0; i < size; i++) {
+    for (unsigned int i = 0; i < size; i++) {
         dst[i] += src[i];
     }
 }

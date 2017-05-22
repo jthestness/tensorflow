@@ -16,7 +16,7 @@
 #define OMPI_SKIP_MPICXX
 #include "third_party/mpi/mpi.h"
 
-#define TAG_TENSOR  12
+#define TAG_TENSOR 12
 
 namespace tensorflow {
 namespace contrib {
@@ -34,7 +34,7 @@ template<typename T>
 DataType TensorFlowDataType();
 
 #define MPI_REQUIRES_OK(MPI_STATUS)                                     \
-    if((MPI_STATUS) != MPI_SUCCESS) {                                   \
+    if ((MPI_STATUS) != MPI_SUCCESS) {                                   \
         return errors::Unknown("MPI operation failed unexpectedly.");   \
     }
 
@@ -113,7 +113,7 @@ cudaStream_t CudaStreamForMPI();
  *
  *  Next, the allgather distributes these fully accumululated chunks across all nodes.
  *  Communication proceeds in the same ring, once again in N-1 steps. At the ith step,
- *  node j will send chunk (j - i + 1) and receive chunk (j - i). For example, at the 
+ *  node j will send chunk (j - i + 1) and receive chunk (j - i). For example, at the
  *  first iteration, the following transfers will occur:
  *
  *      Segment 0:  Node 3 --> Node 0
@@ -142,7 +142,7 @@ Status RingAllreduce(OpKernelContext* context, Tensor& input, Tensor* output) {
 
     // Allocate a new output tensor and copy data to it.
     Status status = context->allocate_temp(TensorFlowDataType<T>(), input.shape(), output);
-    if(!status.ok()) {
+    if (!status.ok()) {
         return status;
     }
     T* buffer = (T*) output->tensor_data().data();
@@ -174,7 +174,7 @@ Status RingAllreduce(OpKernelContext* context, Tensor& input, Tensor* output) {
     tensorflow::Tensor temp;
     shape.AddDim(segment_sizes[0]);
     status = context->allocate_temp(TensorFlowDataType<T>(), shape, &temp);
-    if(!status.ok()) {
+    if (!status.ok()) {
         return status;
     }
     T* segment_recv = (T*) temp.tensor_data().data();
@@ -255,32 +255,32 @@ Status RingAllgather(OpKernelContext* context, Tensor& input, Tensor* output,
     // Compute output shape: all dimensions identical, except first, which is
     // the sum of all the input tensor sizes.
     size_t total_dimension_size = 0;
-    for(auto dim : sizes) {
+    for (auto dim : sizes) {
         total_dimension_size += dim;
     }
 
     tensorflow::TensorShape output_shape;
     output_shape.AddDim(total_dimension_size);
-    for(int i = 1; i < input.shape().dims(); i++) {
+    for (int i = 1; i < input.shape().dims(); i++) {
         output_shape.AddDim(input.dim_size(i));
     }
 
     // Compute number of elements in every "row". We can't compute number of
     // elements in every chunks, because those chunks are variable length.
     size_t elements_per_row = 1;
-    for(int i = 1; i < input.shape().dims(); i++) {
+    for (int i = 1; i < input.shape().dims(); i++) {
         elements_per_row *= input.dim_size(i);
     }
 
     Status status = context->allocate_temp(TensorFlowDataType<T>(), output_shape, output);
-    if(!status.ok()) {
+    if (!status.ok()) {
         return status;
     }
 
     // Copy data from input tensor to correct place in output tensor.
     std::vector<size_t> segment_starts(sizes.size());
     segment_starts[0] = 0;
-    for(int i = 1; i < n; i++) {
+    for (int i = 1; i < n; i++) {
         segment_starts[i] = segment_starts[i - 1] + elements_per_row * sizes[i - 1];
     }
     size_t offset = segment_starts[r];
