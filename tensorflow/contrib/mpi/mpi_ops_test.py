@@ -70,9 +70,7 @@ class MPITests(tf.test.TestCase):
     def test_mpi_rank(self):
         """Test that the rank returned by mpi.rank() is correct."""
         true_rank, _ = mpi_env_rank_and_size()
-        print("HERE", flush=True)
         with self.test_session() as session:
-            print("NOW HERE", flush=True)
             rank = session.run(mpi.rank())
             self.assertEqual(true_rank, rank)
 
