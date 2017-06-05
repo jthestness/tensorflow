@@ -83,14 +83,20 @@ namespace mpi {
 // Make sure template specializations are generated in the ring.cu.cc and the
 // ring.cc file, not in this file.
 extern template Status RingAllreduce<GPUDevice, int>(OpKernelContext*, Tensor&, Tensor*);
+extern template Status RingAllreduce<GPUDevice, long long>(OpKernelContext*, Tensor&, Tensor*);
 extern template Status RingAllreduce<GPUDevice, float>(OpKernelContext*, Tensor&, Tensor*);
 extern template Status RingAllgather<GPUDevice, int>(
+    OpKernelContext*, Tensor&, Tensor*, std::vector<size_t>&);
+extern template Status RingAllgather<GPUDevice, long long>(
     OpKernelContext*, Tensor&, Tensor*, std::vector<size_t>&);
 extern template Status RingAllgather<GPUDevice, float>(
     OpKernelContext*, Tensor&, Tensor*, std::vector<size_t>&);
 extern template Status RingAllreduce<CPUDevice, int>(OpKernelContext*, Tensor&, Tensor*);
+extern template Status RingAllreduce<CPUDevice, long long>(OpKernelContext*, Tensor&, Tensor*);
 extern template Status RingAllreduce<CPUDevice, float>(OpKernelContext*, Tensor&, Tensor*);
 extern template Status RingAllgather<CPUDevice, int>(
+    OpKernelContext*, Tensor&, Tensor*, std::vector<size_t>&);
+extern template Status RingAllgather<CPUDevice, long long>(
     OpKernelContext*, Tensor&, Tensor*, std::vector<size_t>&);
 extern template Status RingAllgather<CPUDevice, float>(
     OpKernelContext*, Tensor&, Tensor*, std::vector<size_t>&);
@@ -441,6 +447,9 @@ void PerformReductionOrGather(TensorTable& tensor_table, MPIResponse response) {
         } else if (tensor.dtype() == DT_INT32) {
             status = on_gpu ? RingAllgather<GPU_DEVICE_IF_CUDA, int>(context, tensor, &output, tensor_sizes)
                             : RingAllgather<CPUDevice, int>(context, tensor, &output, tensor_sizes);
+        } else if (tensor.dtype() == DT_INT64) {
+            status = on_gpu ? RingAllgather<GPU_DEVICE_IF_CUDA, long long>(context, tensor, &output, tensor_sizes)
+                            : RingAllgather<CPUDevice, long long>(context, tensor, &output, tensor_sizes);
         } else {
             status = errors::Unknown("Invalid tensor type for MPI allgather.");
         }
@@ -451,6 +460,9 @@ void PerformReductionOrGather(TensorTable& tensor_table, MPIResponse response) {
         } else if (tensor.dtype() == DT_INT32) {
             status = on_gpu ? RingAllreduce<GPU_DEVICE_IF_CUDA, int>(context, tensor, &output)
                             : RingAllreduce<CPUDevice, int>(context, tensor, &output);
+        } else if (tensor.dtype() == DT_INT64) {
+            status = on_gpu ? RingAllreduce<GPU_DEVICE_IF_CUDA, long long>(context, tensor, &output)
+                            : RingAllreduce<CPUDevice, long long>(context, tensor, &output);
         } else {
             status = errors::Unknown("Invalid tensor type for MPI allreduce.");
         }
@@ -771,6 +783,8 @@ Status DataTypeToMPIType(DataType tf_dtype, MPIDataType* mpi_dtype) {
         *mpi_dtype = TF_MPI_FLOAT32;
     } else if (tf_dtype == DT_INT32) {
         *mpi_dtype = TF_MPI_INT32;
+    } else if (tf_dtype == DT_INT64) {
+        *mpi_dtype = TF_MPI_INT64;
     } else {
         return errors::FailedPrecondition("Invalid tensor type passed.");
     }
@@ -1055,7 +1069,7 @@ REGISTER_KERNEL_BUILDER(Name("MPIAllreduce").Device(DEVICE_GPU), MPIAllreduceOp<
 #endif
 
 REGISTER_OP("MPIAllreduce")
-    .Attr("T: {int32, float32}")
+    .Attr("T: {int32, int64, float32}")
     .Input("tensor: T")
     .Output("sum: T")
     .SetShapeFn([](shape_inference::InferenceContext* c) {
@@ -1125,7 +1139,7 @@ REGISTER_KERNEL_BUILDER(Name("MPIAllgather").Device(DEVICE_GPU), MPIAllgatherOp<
 #endif
 
 REGISTER_OP("MPIAllgather")
-    .Attr("T: {int32, float32}")
+    .Attr("T: {int32, int64, float32}")
     .Input("tensor: T")
     .Output("output: T")
     .SetShapeFn([](shape_inference::InferenceContext* c) {

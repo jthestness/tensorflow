@@ -13,16 +13,21 @@ using CPUDevice = Eigen::ThreadPoolDevice;
 
 template<> MPI_Datatype MPIType<float>() { return MPI_FLOAT; };
 template<> MPI_Datatype MPIType<int>() { return MPI_INT; };
+template<> MPI_Datatype MPIType<long long>() { return MPI_LONG_LONG; };
 
 template<> DataType TensorFlowDataType<float>() { return DT_FLOAT; };
 template<> DataType TensorFlowDataType<int>() { return DT_INT32; };
+template<> DataType TensorFlowDataType<long long>() { return DT_INT64; };
 
 // Generate all necessary specializations for RingAllreduce.
 template Status RingAllreduce<GPUDevice, int>(OpKernelContext*, Tensor&, Tensor*);
+template Status RingAllreduce<GPUDevice, long long>(OpKernelContext*, Tensor&, Tensor*);
 template Status RingAllreduce<GPUDevice, float>(OpKernelContext*, Tensor&, Tensor*);
 
 // Generate all necessary specializations for RingAllgather.
 template Status RingAllgather<GPUDevice, int>(
+    OpKernelContext*, Tensor&, Tensor*, std::vector<size_t>&);
+template Status RingAllgather<GPUDevice, long long>(
     OpKernelContext*, Tensor&, Tensor*, std::vector<size_t>&);
 template Status RingAllgather<GPUDevice, float>(
     OpKernelContext*, Tensor&, Tensor*, std::vector<size_t>&);
@@ -59,6 +64,12 @@ template<> void AccumulateTensorData<GPUDevice, int>(
         int* dst, int* src, size_t size) {
     auto stream = CudaStreamForMPI();
     elemwise_accum<int><<<32, 256, 0, stream>>>(dst, src, size);
+    cudaStreamSynchronize(stream);
+};
+template<> void AccumulateTensorData<GPUDevice, long long>(
+        long long* dst, long long* src, size_t size) {
+    auto stream = CudaStreamForMPI();
+    elemwise_accum<long long><<<32, 256, 0, stream>>>(dst, src, size);
     cudaStreamSynchronize(stream);
 };
 

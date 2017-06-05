@@ -13,6 +13,7 @@ enum MPIDataType {
     TF_MPI_INVALID_TYPE = 0;
     TF_MPI_FLOAT32 = 1;
     TF_MPI_INT32 = 2;
+    TF_MPI_INT64 = 3;
 };
 
 // An MPIRequest is a message sent from a rank greater than zero to the
