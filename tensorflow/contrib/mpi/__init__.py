@@ -268,12 +268,6 @@ class Session(tf.Session):
         """
         if config is None:
             config = tf.ConfigProto()
-            config.inter_op_parallelism_threads = 1
-        elif config.inter_op_parallelism_threads != 1:
-            raise ValueError(
-                "inter_op_parallelism_threads must be 1 for MPI")
-        else:
-            config.inter_op_parallelism_threads = 1
 
         if gpu is None:
             config.gpu_options.visible_device_list = ""

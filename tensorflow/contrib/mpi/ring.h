@@ -160,13 +160,13 @@ Status RingAllreduce(OpKernelContext* context, Tensor& input, Tensor* output) {
         segment_sizes[i]++;
     }
 
-    std::vector<size_t> segment_ends(n);
-    segment_ends[0] = segment_sizes[0];
-    for (size_t i = 1; i < segment_ends.size(); ++i) {
-        segment_ends[i] = segment_sizes[i] + segment_ends[i-1];
+    std::vector<size_t> segment_starts(n);
+    segment_starts[0] = 0;
+    for (size_t i = 1; i < segment_starts.size(); ++i) {
+        segment_starts[i] = segment_starts[i-1] + segment_sizes[i-1];
     }
 
-    assert(segment_ends[n-1] == elements_to_reduce);
+    assert(segment_starts[n-1] + segment_sizes[n-1] == elements_to_reduce);
 
     // Allocate temporary buffer - we know the first segment size is the
     // largest.
@@ -193,42 +193,47 @@ Status RingAllreduce(OpKernelContext* context, Tensor& input, Tensor* output) {
     // locally. At the i'th iteration, rank r, sends segment (r-i) and receives
     // segment (r-i-1).
     for (int i = 0; i < n - 1; i++) {
-        T* segment_send = &(buffer[segment_ends[((r-i) + n) % n] -
-                                   segment_sizes[((r-i) + n) % n]]);
+        const size_t send_seg_id = ((r-i) + n) % n;
+        const size_t recv_seg_id = ((r-i-1) + n) % n;
 
-        MPI_REQUIRES_OK(MPI_Irecv(segment_recv, segment_sizes[((r-i-1) + n) % n],
-                  MPIType<T>(), recv_from, TAG_TENSOR, MPI_COMM_WORLD, &recv_req));
+        T* segment_send = &(buffer[segment_starts[send_seg_id]]);
 
-        MPI_REQUIRES_OK(MPI_Send(segment_send, segment_sizes[((r-i) + n) % n],
-                 MPIType<T>(), send_to, TAG_TENSOR, MPI_COMM_WORLD));
+        MPI_REQUIRES_OK(MPI_Irecv(segment_recv, segment_sizes[recv_seg_id],
+                                  MPIType<T>(), recv_from, TAG_TENSOR,
+                                  MPI_COMM_WORLD, &recv_req));
 
-        T *segment_update = &(buffer[segment_ends[((r-i-1) + n) % n] -
-                                     segment_sizes[((r-i-1) + n) % n]]);
+        MPI_REQUIRES_OK(MPI_Send(segment_send, segment_sizes[send_seg_id],
+                                 MPIType<T>(), send_to, TAG_TENSOR,
+                                 MPI_COMM_WORLD));
+
+        T *segment_update = &(buffer[segment_starts[recv_seg_id]]);
 
         // Wait for recv to complete before reduction
         MPI_Wait(&recv_req, &recv_status);
 
-        const int N = segment_sizes[((r-i-1) + n) % n];
-        auto recv = temp.Slice(0, segment_sizes[((r-i-1) + n) % n]);
+        const size_t recv_seg_size = segment_sizes[recv_seg_id];
+        auto recv = temp.Slice(0, recv_seg_size);
         AccumulateTensorData<Device, T>(
-                segment_update, (T*) recv.tensor_data().data(), N);
+                segment_update, (T*) recv.tensor_data().data(), recv_seg_size);
     }
 
     // Now start pipelined ring allgather. At every step, for every rank, we
     // iterate through segments with wraparound and send and recv from our
-    // neighbors. At the i'th iteration, rank r, sends segment (r+1-i) and
+    // neighbors. At the i'th iteration, rank r, sends segment (r-i+1) and
     // receives segment (r-i).
     for (size_t i = 0; i < n - 1; ++i) {
-        // Segment to send - at every iteration we send segment (r+1-i)
-        T* segment_send = &(buffer[segment_ends[((r+1-i) + n) % n] -
-                                   segment_sizes[((r+1-i) + n) % n]]);
+        const size_t send_seg_id = ((r-i+1) + n) % n;
+        const size_t recv_seg_id = ((r-i) + n) % n;
+
+        // Segment to send - at every iteration we send segment (r-i+1)
+        T* segment_send = &(buffer[segment_starts[send_seg_id]]);
 
         // Segment to recv - at every iteration we receive segment (r-i)
-        T* segment_recv = &(buffer[segment_ends[((r-i) + n) % n] -
-                                   segment_sizes[((r-i) + n) % n]]);
-        MPI_REQUIRES_OK(MPI_Sendrecv(segment_send, segment_sizes[((r+1-i) + n) % n],
+        T* segment_recv = &(buffer[segment_starts[recv_seg_id]]);
+
+        MPI_REQUIRES_OK(MPI_Sendrecv(segment_send, segment_sizes[send_seg_id],
                  MPIType<T>(), send_to, TAG_TENSOR, segment_recv,
-                 segment_sizes[((r-i) + n) % n], MPIType<T>(), recv_from,
+                 segment_sizes[recv_seg_id], MPIType<T>(), recv_from,
                  TAG_TENSOR, MPI_COMM_WORLD, &recv_status));
     }
 

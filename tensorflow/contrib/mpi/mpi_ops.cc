@@ -527,10 +527,7 @@ void BackgroundThreadLoop(MPIGlobalState& state) {
 #if GOOGLE_CUDA
     // Set the device, so that this thread uses the same GPU context as the
     // calling thread.
-    if (state.device > 0) {
-        cudaSetDevice(state.device);
-        cudaStreamCreate(&state.stream);
-    }
+    cudaSetDevice(state.device);
 #endif
 
     // Initialize MPI. This must happen on the background thread, since not all
@@ -573,7 +570,7 @@ void BackgroundThreadLoop(MPIGlobalState& state) {
     bool should_shut_down = false;
     do {
         // This delay determines thread frequency and MPI message latency
-        std::this_thread::sleep_for (std::chrono::milliseconds(5));
+        std::this_thread::sleep_for (std::chrono::milliseconds(1));
 
         // Copy the data structures from global state under this lock.
         // However, don't keep the lock for the rest of the loop, so that
@@ -1025,40 +1022,45 @@ class MPIAllreduceOp : public AsyncOpKernel {
  public:
   explicit MPIAllreduceOp(OpKernelConstruction* context) : AsyncOpKernel(context) { }
 
+  bool IsExpensive() override { return false; }
+
   void ComputeAsync(OpKernelContext* context, DoneCallback done) override {
-      bool on_gpu = IsGPUDevice<Device>();
-      OP_REQUIRES_OK(context, InitializedMPIOnSameDevice(on_gpu));
+    bool on_gpu = IsGPUDevice<Device>();
+    OP_REQUIRES_OK(context, InitializedMPIOnSameDevice(on_gpu));
 
 #if GOOGLE_CUDA
-      auto device_context = context->op_device_context();
+    auto device_context = context->op_device_context();
 #endif
-      auto node_name = name();
-      auto callback = [node_name, done, context, on_gpu] {
-        auto tensor = context->input(0);
-        EnqueueTensorAllreduce(context, tensor, node_name, on_gpu,
-                               [node_name, done, context](StatusOr<Tensor> status) {
-            if (status.ok()) {
-                Tensor output = status.ValueOrDie();
-                context->set_output(0, output);
-            }
-            context->SetStatus(status.status());
-            done();
-        });
-      };
-
-      // If we are on a CPU, our device context will be null and we can't
-      // get a stream to enqueue this on. On a CPU this op is called when the
-      // data is already available, so we can just immediately do the allreduce;
-      // we don't have to wait for the data to get populated.
-#if GOOGLE_CUDA
-      if (device_context == nullptr) {
-          callback();
-      } else {
-        auto stream = device_context->stream();
-        stream->ThenDoHostCallback(callback);
+    auto node_name = name();
+    auto allreduce_done_callback = [done, context](StatusOr<Tensor> status) {
+      if (status.ok()) {
+        Tensor output = status.ValueOrDie();
+        context->set_output(0, output);
       }
+      context->SetStatus(status.status());
+      done();
+    };
+
+    auto allreduce_launch_callback = [node_name, done, context, on_gpu,
+                                      allreduce_done_callback] {
+      auto tensor = context->input(0);
+      EnqueueTensorAllreduce(context, tensor, node_name, on_gpu,
+                             allreduce_done_callback);
+    };
+
+    // If we are on a CPU, our device context will be null and we can't
+    // get a stream to enqueue this on. On a CPU this op is called when the
+    // data is already available, so we can just immediately do the allreduce;
+    // we don't have to wait for the data to get populated.
+#if GOOGLE_CUDA
+    if (device_context == nullptr) {
+      allreduce_launch_callback();
+    } else {
+      auto stream = device_context->stream();
+      stream->ThenDoHostCallback(allreduce_launch_callback);
+    }
 #else
-      callback();
+    allreduce_launch_callback();
 #endif
   }
 };
@@ -1092,43 +1094,48 @@ Output
 template <typename Device>
 class MPIAllgatherOp : public AsyncOpKernel {
  public:
-  explicit MPIAllgatherOp(OpKernelConstruction* context) : AsyncOpKernel(context) {
-  }
+  explicit MPIAllgatherOp(OpKernelConstruction* context) :
+    AsyncOpKernel(context) {}
+
+  bool IsExpensive() override { return false; }
 
   void ComputeAsync(OpKernelContext* context, DoneCallback done) override {
-      bool on_gpu = IsGPUDevice<Device>();
-      OP_REQUIRES_OK(context, InitializedMPIOnSameDevice(on_gpu));
+    bool on_gpu = IsGPUDevice<Device>();
+    OP_REQUIRES_OK(context, InitializedMPIOnSameDevice(on_gpu));
 
 #if GOOGLE_CUDA
-      auto device_context = context->op_device_context();
+    auto device_context = context->op_device_context();
 #endif
-      auto node_name = name();
-      auto callback = [node_name, done, context, on_gpu] {
-        auto tensor = context->input(0);
-        EnqueueTensorAllgather(context, tensor, node_name, on_gpu,
-                               [node_name, done, context](StatusOr<Tensor> status) {
-            if (status.ok()) {
-                Tensor output = status.ValueOrDie();
-                context->set_output(0, output);
-            }
-            context->SetStatus(status.status());
-            done();
-        });
-      };
-
-      // If we are on a CPU, our device context will be null and we can't
-      // get a stream to enqueue this on. On a CPU this op is called when the
-      // data is already available, so we can just immediately do the allgather;
-      // we don't have to wait for the data to get populated.
-#if GOOGLE_CUDA
-      if (device_context == nullptr) {
-          callback();
-      } else {
-          auto stream = device_context->stream();
-          stream->ThenDoHostCallback(callback);
+    auto node_name = name();
+    auto allgather_done_callback = [done, context](StatusOr<Tensor> status) {
+      if (status.ok()) {
+        Tensor output = status.ValueOrDie();
+        context->set_output(0, output);
       }
+      context->SetStatus(status.status());
+      done();
+    };
+
+    auto allgather_launch_callback = [node_name, done, context, on_gpu,
+                                      allgather_done_callback] {
+      auto tensor = context->input(0);
+      EnqueueTensorAllgather(context, tensor, node_name, on_gpu,
+                             allgather_done_callback);
+    };
+
+    // If we are on a CPU, our device context will be null and we can't
+    // get a stream to enqueue this on. On a CPU this op is called when the
+    // data is already available, so we can just immediately do the allgather;
+    // we don't have to wait for the data to get populated.
+#if GOOGLE_CUDA
+    if (device_context == nullptr) {
+      allgather_launch_callback();
+    } else {
+      auto stream = device_context->stream();
+      stream->ThenDoHostCallback(allgather_launch_callback);
+    }
 #else
-      callback();
+    allgather_launch_callback();
 #endif
   }
 };
